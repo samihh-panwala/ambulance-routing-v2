@@ -1,41 +1,41 @@
-# routing.py - fixed helpers for ambulances & hospitals in Surat
-import networkx as nx
-from shapely.geometry import Point
+# routing.py
+import osmnx as ox
 import geopandas as gpd
-import streamlit as st
+import random
 
-@st.cache_resource
-def load_graph(place_name="Surat, India"):
-    # Minimal graph for compatibility; no OSMnx hospital fetching
-    G = nx.Graph()
+def load_graph(place="Surat, India"):
+    """Load drivable street graph for given place."""
+    G = ox.graph_from_place(place, network_type="drive")
     return G
 
 def nearest_node(G, lon, lat):
-    # Dummy nearest_node function for compatibility
-    # Returns a unique hash to simulate a node
-    return hash((lon, lat)) % 100000
+    """Find nearest graph node to given coordinates."""
+    return ox.distance.nearest_nodes(G, lon, lat)
 
-def route_travel_time_seconds(G, orig_node, dest_node):
-    # Dummy function: returns arbitrary travel time for compatibility
-    # In actual app, we use Haversine based ETA
-    return 60, [orig_node, dest_node]
+def nodes_to_latlon(G, nodes):
+    """Convert node list to lat/lon coordinates for mapping."""
+    return [(G.nodes[n]["y"], G.nodes[n]["x"]) for n in nodes]
 
-def nodes_to_latlon(G, route):
-    # Dummy conversion
-    return [(0,0) for n in route]
-
-@st.cache_data
-def load_hospitals_with_fallback(min_count=5):
-    # Fixed hospitals in Surat
-    fixed_hospitals = [
-        ("New Civil Hospital", 21.1730, 72.8310),
-        ("SMIMER Hospital", 21.1570, 72.8370),
-        ("Apple Hospital", 21.1650, 72.8240),
-        ("Unique Hospital", 21.1780, 72.8260),
-        ("Sunshine Global Hospital", 21.1690, 72.8400),
-    ]
-    gdf_fallback = gpd.GeoDataFrame(
-        [{"name": name, "geometry": Point(lon, lat)} for name, lat, lon in fixed_hospitals],
-        crs="EPSG:4326"
-    )
-    return gdf_fallback
+def load_hospitals_with_fallback(place, G, min_count=5):
+    """Load hospitals inside the city boundary. Ensure at least min_count exist."""
+    try:
+        tags = {"amenity": "hospital"}
+        gdf = ox.geometries_from_place(place, tags)
+        if not gdf.empty:
+            gdf = gdf.to_crs("EPSG:4326")  # lat/lon
+            gdf = gdf[gdf.geometry.type == "Point"]
+            if len(gdf) > min_count:
+                gdf = gdf.sample(min_count, random_state=42)
+            return gdf
+    except Exception:
+        pass
+    # fallback: pick random nodes as dummy hospitals
+    nodes = list(G.nodes())
+    coords = random.sample(nodes, min_count)
+    rows = []
+    for i, n in enumerate(coords):
+        rows.append({
+            "name": f"Hospital {i+1}",
+            "geometry": gpd.points_from_xy([G.nodes[n]['x']], [G.nodes[n]['y']])[0]
+        })
+    return gpd.GeoDataFrame(rows, crs="EPSG:4326")
